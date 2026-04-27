@@ -7,8 +7,6 @@ __pycache__
 .pytest_cache
 .ruff_cache
 .mypy_cache
-/data
-/charts
 .env
 .env.local
 *.log
