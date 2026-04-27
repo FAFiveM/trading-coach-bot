@@ -1,0 +1,91 @@
+"""Price alerts commands."""
+
+from __future__ import annotations
+
+import discord
+from discord import app_commands
+from sqlalchemy import delete, select
+
+from ..data.market_data import get_market_service
+from ..db.models import PriceAlert
+from ..db.session import get_session
+from ..utils.symbols import parse_symbol
+
+
+def register(tree: app_commands.CommandTree) -> None:
+    group = app_commands.Group(name="alert", description="تنبيهات الأسعار")
+
+    @group.command(name="add", description="أضف تنبيه سعر")
+    @app_commands.choices(
+        direction=[
+            app_commands.Choice(name="فوق", value="above"),
+            app_commands.Choice(name="تحت", value="below"),
+        ]
+    )
+    async def add(
+        interaction: discord.Interaction,
+        symbol: str,
+        direction: app_commands.Choice[str],
+        target: float,
+        note: str = "",
+    ) -> None:
+        try:
+            inst = parse_symbol(symbol)
+        except ValueError as exc:
+            await interaction.response.send_message(f"❌ {exc}", ephemeral=True)
+            return
+        ms = get_market_service()
+        try:
+            _, current = await ms.fetch_last_price(symbol)
+        except Exception as exc:
+            await interaction.response.send_message(f"⚠️ تعذّر التحقق من السعر: {exc}", ephemeral=True)
+            return
+        async with get_session() as s:
+            s.add(
+                PriceAlert(
+                    user_id=str(interaction.user.id),
+                    channel_id=str(interaction.channel_id),
+                    symbol=inst.display,
+                    direction=direction.value,
+                    target=float(target),
+                    note=note,
+                )
+            )
+            await s.commit()
+        await interaction.response.send_message(
+            f"🔔 تنبيه: **{inst.display}** {direction.name} `{target}` (السعر الحالي `{current:.6g}`)",
+            ephemeral=True,
+        )
+
+    @group.command(name="list", description="قائمة تنبيهاتك")
+    async def list_(interaction: discord.Interaction) -> None:
+        async with get_session() as s:
+            res = await s.execute(
+                select(PriceAlert).where(
+                    PriceAlert.user_id == str(interaction.user.id),
+                    PriceAlert.triggered == 0,
+                )
+            )
+            alerts = list(res.scalars())
+        if not alerts:
+            await interaction.response.send_message("لا توجد تنبيهات نشطة.", ephemeral=True)
+            return
+        text = "\n".join(
+            f"#{a.id}: **{a.symbol}** {a.direction} `{a.target}` {('— ' + a.note) if a.note else ''}"
+            for a in alerts
+        )
+        await interaction.response.send_message(text, ephemeral=True)
+
+    @group.command(name="remove", description="احذف تنبيه برقمه")
+    async def remove(interaction: discord.Interaction, alert_id: int) -> None:
+        async with get_session() as s:
+            await s.execute(
+                delete(PriceAlert).where(
+                    PriceAlert.id == alert_id,
+                    PriceAlert.user_id == str(interaction.user.id),
+                )
+            )
+            await s.commit()
+        await interaction.response.send_message("🗑️ حُذف.", ephemeral=True)
+
+    tree.add_command(group)

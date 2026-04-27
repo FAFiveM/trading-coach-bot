@@ -1,0 +1,62 @@
+[project]
+name = "trading-coach-bot"
+version = "0.1.0"
+description = "Personal trading coach Discord bot for forex & crypto with multi-timeframe analysis."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "discord.py>=2.4.0",
+    "ccxt>=4.4.0",
+    "yfinance>=0.2.50",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "scipy>=1.13.0",
+    "mplfinance>=0.12.10b0",
+    "matplotlib>=3.9.0",
+    "aiohttp>=3.10.0",
+    "feedparser>=6.0.11",
+    "apscheduler>=3.10.4",
+    "python-dotenv>=1.0.1",
+    "pydantic>=2.8.0",
+    "pydantic-settings>=2.4.0",
+    "sqlalchemy>=2.0.30",
+    "aiosqlite>=0.20.0",
+    "loguru>=0.7.2",
+    "pillow>=10.4.0",
+    "httpx>=0.27.0",
+    "tabulate>=0.9.0",
+    "tenacity>=9.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6.0",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "mypy>=1.11.0",
+    "types-tabulate>=0.9.0",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "RUF"]
+ignore = ["E501", "B008", "N806", "N812", "RUF001", "RUF002", "RUF003"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = false
+disable_error_code = ["import-untyped"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/coachbot"]
