@@ -8,8 +8,7 @@ venv/
 *.db
 *.sqlite
 *.sqlite3
-data/
-charts/
+trade_*.png
 .cache/
 .pytest_cache/
 .mypy_cache/
