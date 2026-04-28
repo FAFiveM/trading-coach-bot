@@ -64,10 +64,10 @@ class CoachScheduler:
             label, score = aggregate_sentiment(news)
 
             lines = [
-                f"☀️ **التقرير اليومي** ({datetime.now(UTC).strftime('%Y-%m-%d')})",
-                f"مزاج السوق: **{label}** ({score:+.2f})",
+                f"☀️ **Daily Briefing** · {datetime.now(UTC).strftime('%A, %d %b %Y')}",
+                f"Sentiment: **{label}** ({score:+.2f})",
                 "",
-                "📌 **أهم الفرص:**",
+                "📌 **Top Opportunities:**",
             ]
             if ideas:
                 ideas.sort(key=lambda i: i.confidence, reverse=True)
@@ -75,9 +75,9 @@ class CoachScheduler:
                     lines.append(idea.to_summary())
                     lines.append("")
             else:
-                lines.append("لا توجد فرص عالية الجودة حالياً، انتظار سيولة جديدة.")
+                lines.append("No high-quality setups right now — standing by for fresh liquidity.")
 
-            lines.append("📰 **أهم 3 أخبار:**")
+            lines.append("📰 **Top Headlines:**")
             for n in news[:3]:
                 emoji = "📈" if n.sentiment > 0 else "📉" if n.sentiment < 0 else "➖"
                 lines.append(f"{emoji} [{n.title}]({n.link})")
@@ -108,10 +108,11 @@ class CoachScheduler:
                 channel = self.bot.get_channel(int(a.channel_id))
                 if channel:
                     arrow = "⬆️" if a.direction == "above" else "⬇️"
-                    note = f" — {a.note}" if a.note else ""
+                    note = f" — *{a.note}*" if a.note else ""
                     try:
                         await channel.send(
-                            f"{arrow} <@{a.user_id}> **{a.symbol}** لمس {price:.6g} (هدف {a.target:.6g}){note}"
+                            f"{arrow} <@{a.user_id}> **{a.symbol}** hit `{price:.6g}` "
+                            f"(target `{a.target:.6g}`){note}"
                         )
                     except Exception as exc:
                         logger.warning(f"alert send failed: {exc}")
@@ -132,8 +133,8 @@ class CoachScheduler:
         upcoming = [e for e in events if 0 < (e.when - now).total_seconds() < 30 * 60]
         if not upcoming:
             return
-        text = "🚨 **حدث اقتصادي مهم خلال 30 دقيقة:**\n" + "\n".join(
-            f"• {e.country} — {e.title} ({e.when.strftime('%H:%M UTC')})" for e in upcoming
+        text = "🚨 **High-impact event in <30min:**\n" + "\n".join(
+            f"• **{e.country}** — {e.title} (`{e.when.strftime('%H:%M UTC')}`)" for e in upcoming
         )
         await self._broadcast(text)
 

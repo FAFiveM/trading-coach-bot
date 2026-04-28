@@ -24,10 +24,10 @@ class BacktestResult:
 
     def to_text(self) -> str:
         return (
-            f"📊 **Backtest** — {self.symbol} ({self.timeframe})\n"
-            f"الصفقات: {self.trades} | الفائزة: {self.wins} | الخاسرة: {self.losses}\n"
-            f"نسبة الفوز: {self.win_rate:.1f}% | متوسط R:R: {self.avg_rr:.2f}\n"
-            f"إجمالي R: {self.total_r:.2f} | أقصى تراجع: {self.max_dd_r:.2f}R"
+            f"📊 **Backtest** — `{self.symbol}` ({self.timeframe})\n"
+            f"Trades: {self.trades} · Wins: {self.wins} · Losses: {self.losses}\n"
+            f"Win rate: {self.win_rate:.1f}% · Avg R/trade: {self.avg_rr:.2f}\n"
+            f"Total R: {self.total_r:+.2f} · Max drawdown: {self.max_dd_r:.2f}R"
         )
 
 

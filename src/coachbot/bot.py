@@ -53,7 +53,10 @@ class CoachBot(discord.Client):
     async def on_ready(self) -> None:
         assert self.user is not None
         logger.info(f"logged in as {self.user} (id={self.user.id})")
-        await self.change_presence(activity=discord.Game(name="/analyze EURUSD"))
+        await self.change_presence(
+            status=discord.Status.online,
+            activity=discord.Game(name="khadooojjjjiFX"),
+        )
 
     async def close(self) -> None:
         if self.scheduler:

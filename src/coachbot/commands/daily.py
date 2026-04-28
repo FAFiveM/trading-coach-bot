@@ -9,6 +9,7 @@ from discord import app_commands
 from loguru import logger
 from sqlalchemy import select
 
+from .. import ui
 from ..data.feeds import fetch_calendar
 from ..data.market_data import get_market_service
 from ..data.news import aggregate_sentiment, fetch_cryptopanic, fetch_news
@@ -18,7 +19,10 @@ from ..strategy.engine import build_trade_idea
 
 
 def register(tree: app_commands.CommandTree) -> None:
-    @tree.command(name="daily", description="الملخص اليومي للسوق وأهم الفرص")
+    @tree.command(
+        name="daily",
+        description="Daily market briefing — top opportunities, news, sentiment, calendar.",
+    )
     async def daily(interaction: discord.Interaction) -> None:
         await interaction.response.defer(thinking=True)
         ms = get_market_service()
@@ -33,53 +37,81 @@ def register(tree: app_commands.CommandTree) -> None:
                 logger.warning(f"daily {sym}: {exc}")
         ideas.sort(key=lambda i: i.confidence, reverse=True)
 
-        news = await fetch_news("all", 8)
+        news = await fetch_news("all", 10)
         cp = await fetch_cryptopanic(limit=5)
         all_news = news + cp
         label, score = aggregate_sentiment(all_news)
         cal = await fetch_calendar("high")
 
-        embed = discord.Embed(
-            title=f"☀️ Daily Briefing — {datetime.now(UTC).strftime('%Y-%m-%d')}",
-            color=0x42A5F5,
+        title = f"☀️ Daily Briefing — {datetime.now(UTC).strftime('%A, %d %b %Y')}"
+        embed = ui.base_embed(
+            title,
+            color=ui.COLOR_INFO,
+            description=(
+                "Your end-of-cycle market scan: structural bias, top opportunities, "
+                "narrative sentiment, and the calendar that can break the tape."
+            ),
         )
-        embed.add_field(name="🌡️ مزاج السوق", value=f"{label} ({score:+.2f})", inline=False)
+
+        sentiment_emoji = ui.sentiment_emoji(score)
+        embed.add_field(
+            name="🌡️ Market Sentiment",
+            value=f"{sentiment_emoji} **{label}** ({score:+.2f})  ·  {len(all_news)} headlines analyzed",
+            inline=False,
+        )
 
         opp = [i for i in ideas if i.side != "none"]
+        watched_count = len([i for i in ideas if i.side == "none"])
         if opp:
+            chunks = []
+            for i in opp[:3]:
+                bar = ui.confidence_bar(i.confidence, slots=10)
+                chunks.append(f"{i.to_summary()}\n`{bar}` **{i.confidence}%**")
             embed.add_field(
-                name="🎯 أعلى 3 فرص",
-                value="\n\n".join(i.to_summary() for i in opp[:3]),
+                name="🎯 Top Opportunities",
+                value="\n\n".join(chunks),
                 inline=False,
             )
-        else:
-            embed.add_field(name="🎯 الفرص", value="لا توجد فرص واضحة الآن.", inline=False)
+        if watched_count:
+            embed.add_field(
+                name="👁️ On Watch (no clean setup yet)",
+                value=", ".join(f"`{i.symbol}`" for i in ideas if i.side == "none")[:1024],
+                inline=False,
+            )
+        if not opp and not watched_count:
+            embed.add_field(
+                name="🎯 Opportunities",
+                value="No clean signals across the universe right now. Patience.",
+                inline=False,
+            )
 
         if all_news:
             embed.add_field(
-                name="📰 أهم الأخبار",
+                name="📰 Headlines",
                 value="\n".join(
-                    f"{'📈' if n.sentiment > 0 else '📉' if n.sentiment < 0 else '➖'} [{n.title[:80]}]({n.link})"
-                    for n in all_news[:5]
+                    f"{ui.sentiment_emoji(n.sentiment)} [{n.title[:90]}]({n.link})" for n in all_news[:6]
                 ),
                 inline=False,
             )
 
         if cal:
             now = datetime.now(UTC)
-            today = [e for e in cal if e.when.date() == now.date()]
+            today = [e for e in cal if e.when.date() == now.date() and e.when >= now]
             if today:
                 embed.add_field(
-                    name="📅 أحداث اليوم (تأثير عالي)",
+                    name="📅 High-Impact Events Today",
                     value="\n".join(
-                        f"• {e.country} — {e.title} ({e.when.strftime('%H:%M UTC')})" for e in today[:6]
+                        f"• `{e.when.strftime('%H:%M')} UTC` — **{e.country}** {e.title}" for e in today[:6]
                     ),
                     inline=False,
                 )
 
         await interaction.followup.send(embed=embed)
 
-    @tree.command(name="set_daily_channel", description="اختر القناة اللي تستقبل الملخص اليومي")
+    @tree.command(
+        name="set_daily_channel",
+        description="Subscribe this channel to receive the automated daily briefing.",
+    )
     async def set_daily(interaction: discord.Interaction) -> None:
         async with get_session() as s:
             res = await s.execute(
@@ -91,7 +123,13 @@ def register(tree: app_commands.CommandTree) -> None:
                 s.add(us)
             us.daily_alerts_channel = str(interaction.channel_id)
             await s.commit()
-        await interaction.response.send_message(
-            f"✅ راح تستلم الملخص اليومي في هذه القناة الساعة <t:{0}:t> UTC.",
-            ephemeral=True,
+        embed = ui.base_embed(
+            "📡 Daily Briefing — Channel Linked",
+            color=ui.COLOR_LONG,
+            description=(
+                "This channel will receive the automated daily briefing.\n"
+                "Delivery: **every day at the configured UTC hour**.\n"
+                "You can run `/daily` any time for an on-demand snapshot."
+            ),
         )
+        await interaction.response.send_message(embed=embed, ephemeral=True)

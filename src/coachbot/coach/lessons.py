@@ -6,44 +6,64 @@ import random
 
 LESSONS: list[tuple[str, str]] = [
     (
-        "إدارة المخاطرة",
-        "لا تخاطر بأكثر من 1% من رأس المال في الصفقة الواحدة. احفظ رأس مالك أولاً، الأرباح تأتي لاحقاً.",
+        "Risk First",
+        "Never risk more than 1% of your account on a single idea. Capital is the only "
+        "ammo you have — protect it before chasing returns.",
     ),
     (
-        "فريم الزمن الأعلى أولاً",
-        "ابدأ تحليلك دائماً من فريم 4H أو يومي لتحديد الاتجاه، ثم انزل لفريمات أصغر للدخول.",
+        "Top-Down Always",
+        "Start every analysis on 4H or Daily to fix the bias, then drop to 15m for the "
+        "setup and 1m for execution. Trading without HTF context is gambling.",
     ),
     (
-        "السيولة هي الوقود",
-        "السوق يلاحق السيولة. أعلى السوينج هاي وأدنى السوينج لو هي مناطق سيولة. تعلّم انتظار السويب.",
+        "Liquidity Is Fuel",
+        "Markets hunt liquidity. Equal highs/lows, prior swing extremes and round numbers "
+        "are magnets. Wait for the sweep, then look for displacement back into range.",
     ),
     (
-        "الاتساق أهم من الدقة",
-        "نظام بسيط تطبّقه بانضباط أفضل من نظام معقّد تكسره عند أول صفقة. التزم بقواعدك.",
+        "Consistency > Accuracy",
+        "A simple system you actually follow beats a brilliant one you abandon at the "
+        "first loss. Define your rules, journal them, and execute mechanically.",
     ),
     (
-        "جنّب الانتقام",
-        "لا تفتح صفقة مباشرة بعد خسارة لاسترداد المال. خذ نفساً، راجع الجورنال، ثم عُد.",
+        "Kill Revenge Trades",
+        "Never re-enter immediately after a loss to 'get it back'. Stand up, breathe, "
+        "review the journal, and only return when the chart — not your emotions — calls.",
     ),
     (
-        "نسبة المخاطرة/المكافأة",
-        "هدف دائماً 1:2 على الأقل. لو متوسط دقتك 40% وR:R 1:3، أنت رابح على المدى الطويل.",
+        "R:R Is Edge",
+        "Aim for 1:2 minimum. With a 40% hit rate at 1:3 you are profitable long-term. "
+        "Where R:R is poor, the trade is poor — even if the setup looks 'pretty'.",
     ),
     (
-        "Confluence is king",
-        "لا تدخل على إشارة واحدة. ابحث عن 3 تأكيدات متوافقة على الأقل: هيكل + سيولة + Order Block أو FVG.",
+        "Confluence Is King",
+        "Don't enter on a single signal. Stack at least three: HTF bias + liquidity event + "
+        "Order Block / FVG + structure shift. Three or more, or no trade.",
     ),
     (
-        "تجنّب الأخبار الكبيرة",
-        "إغلاق صفقاتك أو تجنّب الدخول قبل 30 دقيقة من NFP/FOMC/CPI. التذبذب يكسر الستوبات.",
+        "Respect News Volatility",
+        "Avoid new entries 30 minutes before NFP / FOMC / CPI. Spreads widen, stops get "
+        "hunted, and your edge collapses inside the spike. Sit out, then reassess.",
     ),
     (
-        "Journal everything",
-        "كل صفقة تدخلها سجّل سببها، حالتك النفسية، والنتيجة. مراجعتك الأسبوعية ستضاعف تطورك.",
+        "Journal Religiously",
+        "Log every trade: thesis, emotion, screenshot, outcome. Weekly review of your own "
+        "tape will improve you faster than any course.",
     ),
     (
-        "السوق صبور وأنت أيضاً",
-        "ليس كل يوم يوم تداول. أحياناً أفضل صفقة هي التي لم تأخذها.",
+        "Patience Pays",
+        "Not every day is a trading day. Sometimes the best trade is the one you didn't "
+        "take. The market always comes back.",
+    ),
+    (
+        "Trade the Plan",
+        "Decide entry, stop and targets BEFORE the candle closes. Once in, you only manage. "
+        "Discretion mid-trade is where most accounts die.",
+    ),
+    (
+        "Volume Confirms",
+        "Breakouts without expanding volume are traps. Real moves leave volume footprints; "
+        "fake moves don't. Read the tape, not just the candle.",
     ),
 ]
 
@@ -53,10 +73,12 @@ def random_lesson() -> tuple[str, str]:
 
 
 COACH_QUESTIONS = [
-    "هل اتجاه الفريم الأعلى يتفق مع صفقتك؟",
-    "ما هي نقطة إبطال الفكرة (Invalidation)؟",
-    "هل الـ R:R لا يقل عن 1:2؟",
-    "هل قياس حجم الصفقة بحيث الخسارة لا تتجاوز 1% من الحساب؟",
-    "هل هناك خبر كبير خلال الساعة القادمة؟",
-    "ما هي عاطفتك الآن: خوف، طمع، انتقام، أم هدوء؟",
+    "Does the higher-timeframe bias align with this trade?",
+    "What is the precise invalidation level for this idea?",
+    "Is the reward-to-risk at least 1:2 — and ideally 1:3+?",
+    "Is your position size such that a full SL is ≤1% of equity?",
+    "Are there any high-impact events within the next hour?",
+    "What is your emotional state right now: calm, fear, greed, revenge?",
+    "Have you logged the thesis before clicking buy/sell?",
+    "What would make you exit early — apart from SL/TP being hit?",
 ]

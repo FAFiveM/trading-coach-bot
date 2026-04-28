@@ -1,4 +1,4 @@
-"""Price alerts commands."""
+"""Price alert commands."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import discord
 from discord import app_commands
 from sqlalchemy import delete, select
 
+from .. import ui
 from ..data.market_data import get_market_service
 from ..db.models import PriceAlert
 from ..db.session import get_session
@@ -13,13 +14,13 @@ from ..utils.symbols import parse_symbol
 
 
 def register(tree: app_commands.CommandTree) -> None:
-    group = app_commands.Group(name="alert", description="تنبيهات الأسعار")
+    group = app_commands.Group(name="alert", description="Price alerts")
 
-    @group.command(name="add", description="أضف تنبيه سعر")
+    @group.command(name="add", description="Set a price alert.")
     @app_commands.choices(
         direction=[
-            app_commands.Choice(name="فوق", value="above"),
-            app_commands.Choice(name="تحت", value="below"),
+            app_commands.Choice(name="above", value="above"),
+            app_commands.Choice(name="below", value="below"),
         ]
     )
     async def add(
@@ -32,13 +33,23 @@ def register(tree: app_commands.CommandTree) -> None:
         try:
             inst = parse_symbol(symbol)
         except ValueError as exc:
-            await interaction.response.send_message(f"❌ {exc}", ephemeral=True)
+            await interaction.response.send_message(
+                embed=ui.base_embed("⚠️ Invalid Symbol", color=ui.COLOR_DANGER, description=str(exc)),
+                ephemeral=True,
+            )
             return
         ms = get_market_service()
         try:
             _, current = await ms.fetch_last_price(symbol)
         except Exception as exc:
-            await interaction.response.send_message(f"⚠️ تعذّر التحقق من السعر: {exc}", ephemeral=True)
+            await interaction.response.send_message(
+                embed=ui.base_embed(
+                    "⚠️ Could Not Verify Price",
+                    color=ui.COLOR_DANGER,
+                    description=f"```\n{exc}\n```",
+                ),
+                ephemeral=True,
+            )
             return
         async with get_session() as s:
             s.add(
@@ -52,12 +63,17 @@ def register(tree: app_commands.CommandTree) -> None:
                 )
             )
             await s.commit()
-        await interaction.response.send_message(
-            f"🔔 تنبيه: **{inst.display}** {direction.name} `{target}` (السعر الحالي `{current:.6g}`)",
-            ephemeral=True,
+        embed = ui.base_embed(
+            "🔔 Alert Armed",
+            color=ui.COLOR_LONG,
+            description=(
+                f"**{inst.display}**  ·  {direction.value.upper()}  `{target}`\n"
+                f"Current: `{ui.fmt_price(current)}`" + (f"\nNote: *{note}*" if note else "")
+            ),
         )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @group.command(name="list", description="قائمة تنبيهاتك")
+    @group.command(name="list", description="Show your active alerts.")
     async def list_(interaction: discord.Interaction) -> None:
         async with get_session() as s:
             res = await s.execute(
@@ -68,15 +84,25 @@ def register(tree: app_commands.CommandTree) -> None:
             )
             alerts = list(res.scalars())
         if not alerts:
-            await interaction.response.send_message("لا توجد تنبيهات نشطة.", ephemeral=True)
+            embed = ui.base_embed(
+                "🔔 Active Alerts",
+                color=ui.COLOR_NEUTRAL,
+                description="No active alerts. Use `/alert add` to arm one.",
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         text = "\n".join(
-            f"#{a.id}: **{a.symbol}** {a.direction} `{a.target}` {('— ' + a.note) if a.note else ''}"
+            f"`#{a.id}` **{a.symbol}** {a.direction} `{a.target}`" + (f" — {a.note}" if a.note else "")
             for a in alerts
         )
-        await interaction.response.send_message(text, ephemeral=True)
+        embed = ui.base_embed(
+            f"🔔 Active Alerts — {len(alerts)}",
+            color=ui.COLOR_INFO,
+            description=text,
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @group.command(name="remove", description="احذف تنبيه برقمه")
+    @group.command(name="remove", description="Remove an alert by its ID.")
     async def remove(interaction: discord.Interaction, alert_id: int) -> None:
         async with get_session() as s:
             await s.execute(
@@ -86,6 +112,11 @@ def register(tree: app_commands.CommandTree) -> None:
                 )
             )
             await s.commit()
-        await interaction.response.send_message("🗑️ حُذف.", ephemeral=True)
+        embed = ui.base_embed(
+            "🗑️ Alert Removed",
+            color=ui.COLOR_NEUTRAL,
+            description=f"Alert `#{alert_id}` is now disabled.",
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     tree.add_command(group)

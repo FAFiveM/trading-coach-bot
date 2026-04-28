@@ -146,9 +146,9 @@ def aggregate_sentiment(items: list[NewsItem]) -> tuple[str, float]:
         return "neutral", 0.0
     score = sum(i.sentiment for i in items) / len(items)
     if score > 0.15:
-        label = "إيجابي"
+        label = "Bullish"
     elif score < -0.15:
-        label = "سلبي"
+        label = "Bearish"
     else:
-        label = "محايد"
+        label = "Neutral"
     return label, round(score, 2)

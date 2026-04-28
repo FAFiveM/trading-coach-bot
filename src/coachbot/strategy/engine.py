@@ -55,14 +55,14 @@ class TradeIdea:
     def to_summary(self) -> str:
         emoji = "🟢" if self.side == "long" else "🔴" if self.side == "short" else "⚪"
         if self.side == "none":
-            return f"{emoji} لا توجد فرصة واضحة الآن. الثقة: {self.confidence}%."
+            return f"{emoji} **{self.symbol}** — No clean setup. Confidence {self.confidence}%."
         return (
             f"{emoji} **{self.symbol}** — {self.side.upper()}\n"
-            f"الدخول: `{self.entry:.6g}` | SL: `{self.stop_loss:.6g}`\n"
-            f"TP1: `{self.take_profit_1:.6g}` (R:R 1:{self.rr_1:.2f})\n"
-            f"TP2: `{self.take_profit_2:.6g}` (R:R 1:{self.rr_2:.2f})\n"
-            f"TP3: `{self.take_profit_3:.6g}` (R:R 1:{self.rr_3:.2f})\n"
-            f"الثقة: **{self.confidence}%** | فريم الدخول: {self.timeframe_entry}"
+            f"Entry `{self.entry:.6g}` · SL `{self.stop_loss:.6g}`\n"
+            f"TP1 `{self.take_profit_1:.6g}` (1:{self.rr_1:.2f}) · "
+            f"TP2 `{self.take_profit_2:.6g}` (1:{self.rr_2:.2f}) · "
+            f"TP3 `{self.take_profit_3:.6g}` (1:{self.rr_3:.2f})\n"
+            f"Confidence **{self.confidence}%** · Entry TF {self.timeframe_entry}"
         )
 
 
@@ -70,7 +70,7 @@ def _bias_from_htf(df: pd.DataFrame, tf: str) -> Bias:
     reasons: list[str] = []
     score = 0.0
     if len(df) < 50:
-        return Bias(tf, "neutral", 0.0, ["بيانات غير كافية"])
+        return Bias(tf, "neutral", 0.0, ["insufficient data"])
     close = df["close"]
     e20 = I.ema(close, 20).iloc[-1]
     e50 = I.ema(close, 50).iloc[-1]
@@ -79,39 +79,40 @@ def _bias_from_htf(df: pd.DataFrame, tf: str) -> Bias:
 
     if last > e50:
         score += 0.4
-        reasons.append("السعر فوق EMA50")
+        reasons.append("price > EMA50")
     else:
         score -= 0.4
-        reasons.append("السعر تحت EMA50")
+        reasons.append("price < EMA50")
     if e20 > e50:
         score += 0.3
-        reasons.append("EMA20 فوق EMA50")
+        reasons.append("EMA20 > EMA50")
     else:
         score -= 0.3
+        reasons.append("EMA20 < EMA50")
     if last > e200:
         score += 0.3
-        reasons.append("السعر فوق EMA200 (اتجاه طويل صاعد)")
+        reasons.append("price > EMA200 (long-term bullish)")
     else:
         score -= 0.3
-        reasons.append("السعر تحت EMA200 (اتجاه طويل هابط)")
+        reasons.append("price < EMA200 (long-term bearish)")
 
     div = I.rsi_divergence(df)
     if div == "bullish":
         score += 0.2
-        reasons.append("دايفرجنس صاعد على RSI")
+        reasons.append("bullish RSI divergence")
     elif div == "bearish":
         score -= 0.2
-        reasons.append("دايفرجنس هابط على RSI")
+        reasons.append("bearish RSI divergence")
 
     structure = smc.detect_structure(df)
     if structure:
         last_evt = structure[-1]
         if last_evt.direction == "bullish":
             score += 0.15
-            reasons.append(f"{last_evt.kind} صاعد على {tf}")
+            reasons.append(f"{last_evt.kind} bullish on {tf}")
         else:
             score -= 0.15
-            reasons.append(f"{last_evt.kind} هابط على {tf}")
+            reasons.append(f"{last_evt.kind} bearish on {tf}")
 
     score = max(-1.0, min(1.0, score))
     label = "bullish" if score > 0.2 else "bearish" if score < -0.2 else "neutral"
@@ -169,7 +170,7 @@ def build_trade_idea(
             confidence=0,
             biases=biases,
             confluences=[],
-            invalidations=["لا توجد بيانات لفريم الدخول"],
+            invalidations=["no entry-timeframe data"],
             notes=[],
             chart_levels={},
         )
@@ -187,10 +188,10 @@ def build_trade_idea(
     if sweeps_15m:
         last_sweep = sweeps_15m[-1]
         if side == "long" and last_sweep.direction == "low_swept":
-            confluences.append(f"سويب سيولة أسفل {last_sweep.level:.6g} على 15m")
+            confluences.append(f"Liquidity sweep below {last_sweep.level:.6g} on 15m")
             confidence += 15
         elif side == "short" and last_sweep.direction == "high_swept":
-            confluences.append(f"سويب سيولة أعلى {last_sweep.level:.6g} على 15m")
+            confluences.append(f"Liquidity sweep above {last_sweep.level:.6g} on 15m")
             confidence += 15
 
     aligned_obs = [
@@ -200,7 +201,7 @@ def build_trade_idea(
     ]
     if aligned_obs:
         ob = aligned_obs[-1]
-        confluences.append(f"Order Block {ob.direction} على 15m بين {ob.bottom:.6g}-{ob.top:.6g}")
+        confluences.append(f"Order Block ({ob.direction}) on 15m between {ob.bottom:.6g}-{ob.top:.6g}")
         confidence += 10
 
     aligned_fvgs = [
@@ -210,18 +211,18 @@ def build_trade_idea(
     ]
     if aligned_fvgs:
         g = aligned_fvgs[-1]
-        confluences.append(f"FVG غير ممتلئ بين {g.bottom:.6g}-{g.top:.6g}")
+        confluences.append(f"Unfilled Fair Value Gap between {g.bottom:.6g}-{g.top:.6g}")
         confidence += 8
 
     pats = P.detect_patterns(df15m) if df15m is not None else []
     for p in pats:
-        confluences.append(f"نموذج فني: {p}")
+        confluences.append(f"Chart pattern: {p}")
         confidence += 4
 
     confidence = max(0, min(99, confidence))
 
     if side == "none" or confidence < 35:
-        notes.append("الإشارة ضعيفة، يُفضّل الانتظار لتأكيد إضافي.")
+        notes.append("Signal is weak — wait for additional confirmation.")
         return TradeIdea(
             symbol=symbol,
             side="none",
@@ -280,9 +281,9 @@ def build_trade_idea(
         tp3 = entry - risk * rr3
 
     invalidations.append(
-        f"الفكرة تُلغى إذا أُغلقت شمعة 15m {'تحت' if side == 'long' else 'فوق'} {stop_loss:.6g}"
+        f"Idea invalid if a 15m candle closes {'below' if side == 'long' else 'above'} {stop_loss:.6g}"
     )
-    notes.append("الدخول مفضّل بعد كسر هيكل دقيق على فريم 1m مع زيادة فوليوم.")
+    notes.append("Prefer entry after a clean 1m break of structure with a volume expansion.")
 
     chart_levels = {
         "entry": entry,

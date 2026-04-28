@@ -6,20 +6,24 @@ import discord
 from discord import app_commands
 from sqlalchemy import delete, select
 
+from .. import ui
 from ..db.models import WatchlistItem
 from ..db.session import get_session
 from ..utils.symbols import parse_symbol
 
 
 def register(tree: app_commands.CommandTree) -> None:
-    group = app_commands.Group(name="watchlist", description="إدارة قائمة المتابعة")
+    group = app_commands.Group(name="watchlist", description="Manage your watchlist")
 
-    @group.command(name="add", description="أضف زوج لقائمة المتابعة")
+    @group.command(name="add", description="Add a symbol to your watchlist.")
     async def add(interaction: discord.Interaction, symbol: str) -> None:
         try:
             inst = parse_symbol(symbol)
         except ValueError as exc:
-            await interaction.response.send_message(f"❌ {exc}", ephemeral=True)
+            await interaction.response.send_message(
+                embed=ui.base_embed("⚠️ Invalid Symbol", color=ui.COLOR_DANGER, description=str(exc)),
+                ephemeral=True,
+            )
             return
         async with get_session() as s:
             existing = await s.execute(
@@ -29,13 +33,25 @@ def register(tree: app_commands.CommandTree) -> None:
                 )
             )
             if existing.scalar_one_or_none():
-                await interaction.response.send_message(f"موجود مسبقاً: {inst.display}", ephemeral=True)
+                await interaction.response.send_message(
+                    embed=ui.base_embed(
+                        "ℹ️ Already on Watchlist",
+                        color=ui.COLOR_NEUTRAL,
+                        description=f"`{inst.display}` is already on your list.",
+                    ),
+                    ephemeral=True,
+                )
                 return
             s.add(WatchlistItem(user_id=str(interaction.user.id), symbol=inst.display))
             await s.commit()
-        await interaction.response.send_message(f"✅ أُضيف {inst.display}", ephemeral=True)
+        embed = ui.base_embed(
+            "✅ Added to Watchlist",
+            color=ui.COLOR_LONG,
+            description=f"**{inst.display}** is now on your watchlist.",
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @group.command(name="remove", description="احذف زوج من القائمة")
+    @group.command(name="remove", description="Remove a symbol from your watchlist.")
     async def remove(interaction: discord.Interaction, symbol: str) -> None:
         async with get_session() as s:
             await s.execute(
@@ -45,9 +61,14 @@ def register(tree: app_commands.CommandTree) -> None:
                 )
             )
             await s.commit()
-        await interaction.response.send_message(f"🗑️ حُذف {symbol}", ephemeral=True)
+        embed = ui.base_embed(
+            "🗑️ Removed",
+            color=ui.COLOR_NEUTRAL,
+            description=f"**{symbol.upper()}** removed from your watchlist.",
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @group.command(name="show", description="عرض قائمتك")
+    @group.command(name="show", description="Show your watchlist.")
     async def show(interaction: discord.Interaction) -> None:
         async with get_session() as s:
             res = await s.execute(
@@ -55,9 +76,19 @@ def register(tree: app_commands.CommandTree) -> None:
             )
             items = list(res.scalars())
         if not items:
-            await interaction.response.send_message("القائمة فارغة. استخدم `/watchlist add`.", ephemeral=True)
+            embed = ui.base_embed(
+                "📋 Watchlist",
+                color=ui.COLOR_NEUTRAL,
+                description="Empty. Use `/watchlist add SYMBOL` to add your first pair.",
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
-        text = "\n".join(f"• {i.symbol}" for i in items)
-        await interaction.response.send_message(f"📋 قائمتك:\n{text}", ephemeral=True)
+        text = "\n".join(f"• **{i.symbol}**" for i in items)
+        embed = ui.base_embed(
+            f"📋 Watchlist — {len(items)} symbols",
+            color=ui.COLOR_INFO,
+            description=text,
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     tree.add_command(group)

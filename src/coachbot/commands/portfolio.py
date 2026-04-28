@@ -8,16 +8,17 @@ import discord
 from discord import app_commands
 from sqlalchemy import select
 
+from .. import ui
 from ..data.market_data import get_market_service
 from ..db.models import JournalEntry, Trade
 from ..db.session import get_session
 
 
 def register(tree: app_commands.CommandTree) -> None:
-    p_group = app_commands.Group(name="portfolio", description="محفظتك")
-    j_group = app_commands.Group(name="journal", description="جورنال التداول")
+    p_group = app_commands.Group(name="portfolio", description="Portfolio management")
+    j_group = app_commands.Group(name="journal", description="Trading journal")
 
-    @p_group.command(name="open", description="افتح صفقة جديدة")
+    @p_group.command(name="open", description="Open a new tracked trade.")
     @app_commands.choices(
         side=[
             app_commands.Choice(name="long", value="long"),
@@ -50,12 +51,18 @@ def register(tree: app_commands.CommandTree) -> None:
             s.add(t)
             await s.commit()
             await s.refresh(t)
-        await interaction.response.send_message(
-            f"📒 صفقة #{t.id} مفتوحة: {symbol.upper()} {side.value.upper()} @ {entry} | SL {stop_loss} | TP {take_profit} | R:R 1:{rr:.2f}",
-            ephemeral=True,
+        embed = ui.base_embed(
+            f"📒 Trade #{t.id} — Opened",
+            color=ui.side_color(side.value),
+            description=(
+                f"**{symbol.upper()}** · {side.value.upper()} · size `{size}`\n"
+                f"Entry `{entry}` · SL `{stop_loss}` · TP `{take_profit}`\n"
+                f"R:R **1:{rr:.2f}**"
+            ),
         )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @p_group.command(name="close", description="أغلق صفقة برقمها")
+    @p_group.command(name="close", description="Close a tracked trade by its ID.")
     async def close_trade(interaction: discord.Interaction, trade_id: int, exit_price: float) -> None:
         async with get_session() as s:
             res = await s.execute(
@@ -63,10 +70,24 @@ def register(tree: app_commands.CommandTree) -> None:
             )
             t = res.scalar_one_or_none()
             if not t:
-                await interaction.response.send_message("الصفقة غير موجودة.", ephemeral=True)
+                await interaction.response.send_message(
+                    embed=ui.base_embed(
+                        "⚠️ Not Found",
+                        color=ui.COLOR_DANGER,
+                        description=f"Trade `#{trade_id}` does not exist.",
+                    ),
+                    ephemeral=True,
+                )
                 return
             if t.status == "closed":
-                await interaction.response.send_message("مغلقة مسبقاً.", ephemeral=True)
+                await interaction.response.send_message(
+                    embed=ui.base_embed(
+                        "ℹ️ Already Closed",
+                        color=ui.COLOR_NEUTRAL,
+                        description=f"Trade `#{trade_id}` is already closed.",
+                    ),
+                    ephemeral=True,
+                )
                 return
             if t.side == "long":
                 pnl = (exit_price - t.entry) * t.size
@@ -80,18 +101,26 @@ def register(tree: app_commands.CommandTree) -> None:
             t.status = "closed"
             t.closed_at = datetime.utcnow()
             await s.commit()
-        await interaction.response.send_message(
-            f"✅ #{trade_id} أُغلقت @ {exit_price} | PnL {pnl:+.4f} | {r_mult:+.2f}R",
-            ephemeral=True,
+        color = ui.COLOR_LONG if pnl >= 0 else ui.COLOR_SHORT
+        embed = ui.base_embed(
+            f"✅ Trade #{trade_id} — Closed",
+            color=color,
+            description=(f"Exit `{exit_price}` · PnL **{pnl:+.4f}** · {r_mult:+.2f}R"),
         )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @p_group.command(name="show", description="ملخص محفظتك")
+    @p_group.command(name="show", description="Portfolio overview — open trades, win rate, PnL.")
     async def show(interaction: discord.Interaction) -> None:
         async with get_session() as s:
             res = await s.execute(select(Trade).where(Trade.user_id == str(interaction.user.id)))
             trades = list(res.scalars())
         if not trades:
-            await interaction.response.send_message("لا توجد صفقات بعد.", ephemeral=True)
+            embed = ui.base_embed(
+                "💼 Portfolio",
+                color=ui.COLOR_NEUTRAL,
+                description="No trades yet. Use `/portfolio open` to track your first trade.",
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         closed = [t for t in trades if t.status == "closed"]
         wins = [t for t in closed if (t.pnl or 0) > 0]
@@ -109,24 +138,37 @@ def register(tree: app_commands.CommandTree) -> None:
                     rr_now = (p - t.entry) / max(abs(t.entry - t.stop_loss), 1e-9)
                 else:
                     rr_now = (t.entry - p) / max(abs(t.stop_loss - t.entry), 1e-9)
-                open_lines.append(f"• #{t.id} {t.symbol} {t.side} @ {t.entry} → {p:.6g} ({rr_now:+.2f}R)")
+                open_lines.append(
+                    f"• `#{t.id}` **{t.symbol}** {t.side} @ `{t.entry}` → `{p:.6g}` ({rr_now:+.2f}R)"
+                )
             except Exception:
-                open_lines.append(f"• #{t.id} {t.symbol} {t.side} @ {t.entry}")
+                open_lines.append(
+                    f"• `#{t.id}` **{t.symbol}** {t.side} @ `{t.entry}` (live price unavailable)"
+                )
 
-        embed = discord.Embed(title="💼 محفظتك", color=0x29B6F6)
+        embed = ui.base_embed("💼 Portfolio Overview", color=ui.COLOR_CYAN)
         embed.add_field(
-            name="إجماليات",
-            value=(
-                f"الصفقات: {len(trades)} (مفتوحة {len(trades) - len(closed)})\n"
-                f"نسبة الفوز: {wr:.1f}% | إجمالي PnL: {total_pnl:+.4f} | إجمالي R: {total_r:+.2f}"
+            name="📊 Stats",
+            value=ui.code_block(
+                f"Total trades : {len(trades)}\n"
+                f"Open         : {len(trades) - len(closed)}\n"
+                f"Closed       : {len(closed)}\n"
+                f"Win rate     : {wr:.1f}%\n"
+                f"Total PnL    : {total_pnl:+.4f}\n"
+                f"Total R      : {total_r:+.2f}",
+                "yaml",
             ),
             inline=False,
         )
         if open_lines:
-            embed.add_field(name="🟢 الصفقات المفتوحة", value="\n".join(open_lines)[:1024], inline=False)
+            embed.add_field(
+                name="🟢 Open Positions",
+                value="\n".join(open_lines)[:1024],
+                inline=False,
+            )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @j_group.command(name="add", description="أضف ملاحظة جورنال")
+    @j_group.command(name="add", description="Add a journal note.")
     async def jadd(interaction: discord.Interaction, text: str, trade_id: int = 0) -> None:
         async with get_session() as s:
             entry = JournalEntry(
@@ -136,9 +178,14 @@ def register(tree: app_commands.CommandTree) -> None:
             )
             s.add(entry)
             await s.commit()
-        await interaction.response.send_message("📝 سُجّل.", ephemeral=True)
+        embed = ui.base_embed(
+            "📝 Journal Saved",
+            color=ui.COLOR_LONG,
+            description="Reflection beats reaction — every entry compounds your edge.",
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @j_group.command(name="show", description="آخر 10 ملاحظات")
+    @j_group.command(name="show", description="Show your latest 10 journal notes.")
     async def jshow(interaction: discord.Interaction) -> None:
         async with get_session() as s:
             res = await s.execute(
@@ -149,13 +196,19 @@ def register(tree: app_commands.CommandTree) -> None:
             )
             items = list(res.scalars())
         if not items:
-            await interaction.response.send_message("الجورنال فاضي.", ephemeral=True)
+            embed = ui.base_embed(
+                "📝 Journal",
+                color=ui.COLOR_NEUTRAL,
+                description="Empty. Use `/journal add` to log your first thought.",
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         text = "\n\n".join(
-            f"`{i.created_at:%Y-%m-%d %H:%M}` {'#' + str(i.trade_id) + ' — ' if i.trade_id else ''}{i.text}"
+            f"`{i.created_at:%Y-%m-%d %H:%M}` {('#' + str(i.trade_id) + ' — ') if i.trade_id else ''}{i.text}"
             for i in items
         )
-        await interaction.response.send_message(text[:1990], ephemeral=True)
+        embed = ui.base_embed("📝 Latest Journal Entries", color=ui.COLOR_INFO, description=text[:4000])
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     tree.add_command(p_group)
     tree.add_command(j_group)
