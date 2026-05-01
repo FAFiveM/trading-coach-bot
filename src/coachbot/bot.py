@@ -15,6 +15,7 @@ from .commands import analyze as analyze_cmds
 from .commands import daily as daily_cmds
 from .commands import info as info_cmds
 from .commands import portfolio as portfolio_cmds
+from .commands import signals as signals_cmds
 from .commands import watchlist as watchlist_cmds
 from .config import settings
 from .data.market_data import get_market_service
@@ -37,6 +38,7 @@ class CoachBot(discord.Client):
         alert_cmds.register(self.tree)
         portfolio_cmds.register(self.tree)
         info_cmds.register(self.tree)
+        signals_cmds.register(self.tree)
 
         if settings.coach_guild_id:
             guild = discord.Object(id=settings.coach_guild_id)

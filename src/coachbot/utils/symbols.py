@@ -25,7 +25,14 @@ class Instrument:
         if self.market == "forex":
             return f"{self.base}{self.quote}=X"
         if self.market == "commodity":
-            return self.raw
+            commodity_map = {
+                "XAUUSD": "GC=F",
+                "XAGUSD": "SI=F",
+                "WTIUSD": "CL=F",
+                "BRENT": "BZ=F",
+            }
+            key = f"{self.base}{self.quote}"
+            return commodity_map.get(key, f"{self.base}{self.quote}=X")
         return f"{self.base}-{self.quote}"
 
     @property

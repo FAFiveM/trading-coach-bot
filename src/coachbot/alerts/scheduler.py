@@ -1,28 +1,67 @@
-"""Async scheduler: daily market scan, price alerts, news alerts."""
+"""Async scheduler: continuous A+ scanner, hourly briefing, daily report,
+price alerts, news/calendar alerts.
+"""
 
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import discord
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
+from .. import ui
+from ..charts.render import render_trade_chart
 from ..config import settings
 from ..data.feeds import fetch_calendar
 from ..data.market_data import get_market_service
 from ..data.news import aggregate_sentiment, fetch_news
-from ..db.models import PriceAlert, UserSettings, WatchlistItem
+from ..db.models import (
+    DispatchedSignal,
+    PriceAlert,
+    SignalsChannel,
+    UserSettings,
+)
 from ..db.session import get_session
-from ..strategy.engine import build_trade_idea
+from ..strategy.engine import TradeIdea, build_trade_idea
+
+SCAN_FOREX = [
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "AUDUSD",
+    "NZDUSD",
+    "USDCAD",
+    "USDCHF",
+    "EURJPY",
+    "GBPJPY",
+    "EURGBP",
+    "AUDJPY",
+    "EURAUD",
+    "XAUUSD",
+]
+
+SCAN_CRYPTO = [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "BNBUSDT",
+    "XRPUSDT",
+    "DOGEUSDT",
+]
+
+SCAN_TIMEFRAMES = ["4h", "1h", "15m", "5m", "1m"]
+DEDUPE_WINDOW = timedelta(hours=4)
+SIGNAL_PRICE_TOLERANCE = 0.0035  # 0.35% — same setup if entry within this band
 
 
 class CoachScheduler:
     def __init__(self, bot: discord.Client) -> None:
         self.bot = bot
         self._scheduler = AsyncIOScheduler(timezone="UTC")
+        self._scan_lock = asyncio.Lock()
 
     def start(self) -> None:
         self._scheduler.add_job(
@@ -34,26 +73,261 @@ class CoachScheduler:
             replace_existing=True,
         )
         self._scheduler.add_job(
+            self._continuous_scan,
+            "interval",
+            minutes=10,
+            id="continuous_scan",
+            replace_existing=True,
+            next_run_time=datetime.now(UTC) + timedelta(seconds=45),
+        )
+        self._scheduler.add_job(
+            self._hourly_briefing,
+            "cron",
+            minute=5,
+            id="hourly_briefing",
+            replace_existing=True,
+        )
+        self._scheduler.add_job(
             self._tick_alerts, "interval", minutes=1, id="price_alerts", replace_existing=True
         )
         self._scheduler.add_job(
             self._calendar_watch, "interval", minutes=15, id="calendar", replace_existing=True
         )
+        self._scheduler.add_job(
+            self._cleanup_dispatched,
+            "interval",
+            hours=6,
+            id="cleanup_dispatched",
+            replace_existing=True,
+        )
         self._scheduler.start()
-        logger.info("scheduler started")
+        logger.info("scheduler started (continuous A+ scanner + hourly briefing enabled)")
 
     def shutdown(self) -> None:
         if self._scheduler.running:
             self._scheduler.shutdown(wait=False)
 
+    # ---------- continuous A+ scanner ---------- #
+
+    async def _continuous_scan(self) -> None:
+        if self._scan_lock.locked():
+            logger.debug("continuous_scan still running, skipping cycle")
+            return
+        async with self._scan_lock:
+            ms = get_market_service()
+            symbols = SCAN_FOREX + SCAN_CRYPTO
+            sent = 0
+            scanned = 0
+            for sym in symbols:
+                try:
+                    _, mtf = await ms.fetch_multi(sym, SCAN_TIMEFRAMES, limit=400)
+                except Exception as exc:
+                    logger.debug(f"scan fetch failed {sym}: {exc}")
+                    continue
+                scanned += 1
+                try:
+                    idea = build_trade_idea(sym, mtf)
+                except Exception as exc:
+                    logger.warning(f"scan idea failed {sym}: {exc}")
+                    continue
+                if idea.side == "none" or idea.confidence < 85:
+                    continue
+                already = await self._already_dispatched(sym, idea)
+                if already:
+                    continue
+                df_chart = None
+                for key in ("15m", "5m", "1m"):
+                    cand = mtf.get(key)
+                    if cand is not None and not cand.empty:
+                        df_chart = cand
+                        break
+                chart_path = None
+                if df_chart is not None and not df_chart.empty:
+                    try:
+                        chart_path = render_trade_chart(sym, "15m", df_chart, idea)
+                    except Exception as exc:
+                        logger.warning(f"scan chart failed {sym}: {exc}")
+                ok = await self._broadcast_signal(idea, chart_path)
+                if ok:
+                    await self._record_dispatched(idea)
+                    sent += 1
+                if sent >= 5:
+                    break
+            logger.info(f"continuous_scan: scanned {scanned}/{len(symbols)} symbols, dispatched {sent}")
+
+    async def _already_dispatched(self, symbol: str, idea: TradeIdea) -> bool:
+        cutoff = datetime.utcnow() - DEDUPE_WINDOW
+        async with get_session() as s:
+            res = await s.execute(
+                select(DispatchedSignal)
+                .where(DispatchedSignal.symbol == symbol)
+                .where(DispatchedSignal.side == idea.side)
+                .where(DispatchedSignal.sent_at >= cutoff)
+            )
+            rows = list(res.scalars())
+        for r in rows:
+            if r.entry == 0:
+                continue
+            if abs(idea.entry - r.entry) / abs(r.entry) <= SIGNAL_PRICE_TOLERANCE:
+                return True
+        return False
+
+    async def _record_dispatched(self, idea: TradeIdea) -> None:
+        async with get_session() as s:
+            s.add(
+                DispatchedSignal(
+                    symbol=idea.symbol,
+                    side=idea.side,
+                    entry=float(idea.entry),
+                    confidence=int(idea.confidence),
+                )
+            )
+            await s.commit()
+
+    async def _cleanup_dispatched(self) -> None:
+        cutoff = datetime.utcnow() - timedelta(days=3)
+        async with get_session() as s:
+            await s.execute(delete(DispatchedSignal).where(DispatchedSignal.sent_at < cutoff))
+            await s.commit()
+
+    async def _broadcast_signal(self, idea: TradeIdea, chart_path) -> bool:
+        async with get_session() as s:
+            res = await s.execute(select(SignalsChannel))
+            chans = list(res.scalars())
+        if not chans:
+            return False
+        embed = self._build_signal_embed(idea)
+        sent_any = False
+        for c in chans:
+            if idea.confidence < int(c.min_confidence or 85):
+                continue
+            channel = self.bot.get_channel(int(c.channel_id))
+            if channel is None:
+                continue
+            content = "@everyone" if c.mention_everyone else None
+            try:
+                file = discord.File(str(chart_path)) if chart_path else None
+                if file:
+                    embed.set_image(url=f"attachment://{chart_path.name}")
+                await channel.send(
+                    content=content,
+                    embed=embed,
+                    file=file,
+                    allowed_mentions=discord.AllowedMentions(everyone=True),
+                )
+                sent_any = True
+            except Exception as exc:
+                logger.warning(f"signal broadcast failed for channel {c.channel_id}: {exc}")
+            await asyncio.sleep(0.3)
+        return sent_any
+
+    def _build_signal_embed(self, idea: TradeIdea) -> discord.Embed:
+        title = f"⚡ A+ Auto-Signal · {idea.symbol} · {ui.side_arrow(idea.side)}"
+        color = ui.side_color(idea.side)
+        embed = ui.base_embed(title, color=color)
+        embed.description = (
+            f"**Confidence:** {idea.confidence}% · Grade **{idea.grade}**\n"
+            f"`{ui.confidence_bar(idea.confidence)}`"
+        )
+        plan = (
+            f"Entry  {ui.fmt_price(idea.entry)}\n"
+            f"SL     {ui.fmt_price(idea.stop_loss)}\n"
+            f"TP1    {ui.fmt_price(idea.take_profit_1)}   (1:{idea.rr_1:.2f})\n"
+            f"TP2    {ui.fmt_price(idea.take_profit_2)}   (1:{idea.rr_2:.2f})\n"
+            f"TP3    {ui.fmt_price(idea.take_profit_3)}   (1:{idea.rr_3:.2f})"
+        )
+        embed.add_field(name="📐 Trade Plan", value=ui.code_block(plan), inline=False)
+        if idea.confluences:
+            top = idea.confluences[:6]
+            embed.add_field(
+                name="🧬 Confluences",
+                value="\n".join(f"• {c}" for c in top),
+                inline=False,
+            )
+        if idea.invalidations:
+            embed.add_field(
+                name="🛑 Invalidation",
+                value="\n".join(f"• {c}" for c in idea.invalidations[:3]),
+                inline=False,
+            )
+        embed.add_field(
+            name="ℹ️ Disclaimer",
+            value=(
+                "Confidence reflects how many internal filters aligned — it is **not** "
+                "a guaranteed win rate. Always size with risk in mind."
+            ),
+            inline=False,
+        )
+        return embed
+
+    # ---------- hourly market briefing ---------- #
+
+    async def _hourly_briefing(self) -> None:
+        async with get_session() as s:
+            res = await s.execute(select(SignalsChannel))
+            chans = list(res.scalars())
+        if not chans:
+            return
+        try:
+            ms = get_market_service()
+            top_lines: list[str] = []
+            best: list[TradeIdea] = []
+            for sym in SCAN_FOREX[:6] + SCAN_CRYPTO[:3]:
+                try:
+                    _, mtf = await ms.fetch_multi(sym, ["1h", "15m", "5m", "1m"], limit=300)
+                    idea = build_trade_idea(sym, mtf)
+                    best.append(idea)
+                except Exception as exc:
+                    logger.debug(f"hourly idea fail {sym}: {exc}")
+            best.sort(key=lambda i: i.confidence, reverse=True)
+            for idea in best[:5]:
+                arrow = ui.side_arrow(idea.side)
+                top_lines.append(
+                    f"{arrow}  **{idea.symbol}** — {idea.confidence}% ({idea.grade})"
+                )
+            news = await fetch_news("all", 5)
+            label, score = aggregate_sentiment(news)
+
+            embed = ui.base_embed(
+                f"🕐 Hourly Market Pulse · {datetime.now(UTC).strftime('%H:%M UTC')}",
+                color=ui.COLOR_INFO,
+            )
+            embed.description = (
+                f"Sentiment: **{label}** ({score:+.2f})\n"
+                "Top setups across major forex + crypto right now:"
+            )
+            embed.add_field(
+                name="📊 Top Setups",
+                value="\n".join(top_lines) if top_lines else "No setups detected.",
+                inline=False,
+            )
+            if news:
+                head = "\n".join(f"• [{n.title[:90]}]({n.link})" for n in news[:3])
+                embed.add_field(name="📰 Headlines", value=head, inline=False)
+        except Exception as exc:
+            logger.exception(f"hourly briefing build failed: {exc}")
+            return
+
+        for c in chans:
+            channel = self.bot.get_channel(int(c.channel_id))
+            if channel is None:
+                continue
+            try:
+                await channel.send(embed=embed)
+            except Exception as exc:
+                logger.warning(f"hourly briefing send failed: {exc}")
+            await asyncio.sleep(0.25)
+
+    # ---------- daily scan (kept) ---------- #
+
     async def _daily_scan(self) -> None:
         try:
             ms = get_market_service()
-            symbols_default = ["BTCUSDT", "ETHUSDT", "EURUSD", "GBPUSD", "XAUUSD"]
+            symbols_default = SCAN_FOREX[:5] + SCAN_CRYPTO[:3]
             ideas = []
             for sym in symbols_default:
                 try:
-                    _, mtf = await ms.fetch_multi(sym, ["4h", "1h", "15m", "5m", "1m"], limit=400)
+                    _, mtf = await ms.fetch_multi(sym, SCAN_TIMEFRAMES, limit=400)
                     idea = build_trade_idea(sym, mtf)
                     if idea.side != "none":
                         ideas.append(idea)
@@ -142,14 +416,20 @@ class CoachScheduler:
         async with get_session() as s:
             res = await s.execute(select(UserSettings).where(UserSettings.daily_alerts_channel.isnot(None)))
             users = list(res.scalars())
-            wl_res = await s.execute(select(WatchlistItem))
-            _ = list(wl_res.scalars())  # warm cache
+            sig_res = await s.execute(select(SignalsChannel))
+            sig_chans = list(sig_res.scalars())
         seen: set[str] = set()
+        targets: list[str] = []
         for u in users:
-            if u.daily_alerts_channel in seen:
-                continue
-            seen.add(u.daily_alerts_channel)
-            channel = self.bot.get_channel(int(u.daily_alerts_channel))
+            if u.daily_alerts_channel and u.daily_alerts_channel not in seen:
+                seen.add(u.daily_alerts_channel)
+                targets.append(u.daily_alerts_channel)
+        for c in sig_chans:
+            if c.channel_id not in seen:
+                seen.add(c.channel_id)
+                targets.append(c.channel_id)
+        for cid in targets:
+            channel = self.bot.get_channel(int(cid))
             if not channel:
                 continue
             try:

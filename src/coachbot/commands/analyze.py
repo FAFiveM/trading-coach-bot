@@ -80,7 +80,7 @@ def _format_idea_embed(idea, inst_display: str) -> discord.Embed:
         bar = ui.confidence_bar(idea.confidence)
         embed.add_field(
             name="📈 Confidence",
-            value=f"`{bar}`  **{idea.confidence}%**",
+            value=f"`{bar}`  **{idea.confidence}%**  ·  Grade **{idea.grade}**",
             inline=True,
         )
 

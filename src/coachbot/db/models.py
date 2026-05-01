@@ -73,3 +73,27 @@ class UserSettings(Base):
     max_daily_loss_pct = Column(Float, default=3.0)
     coach_mode = Column(Integer, default=1)
     timezone = Column(String(64), default="UTC")
+
+
+class SignalsChannel(Base):
+    """A channel that opted in to receive A+ auto-signals and hourly briefings."""
+
+    __tablename__ = "signals_channels"
+    channel_id = Column(String(64), primary_key=True)
+    guild_id = Column(String(64), nullable=True)
+    enabled_by = Column(String(64), nullable=False)
+    mention_everyone = Column(Integer, default=1)
+    min_confidence = Column(Integer, default=85)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class DispatchedSignal(Base):
+    """Tracks signals already broadcast so we never send the same setup twice."""
+
+    __tablename__ = "dispatched_signals"
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String(32), index=True, nullable=False)
+    side = Column(String(8), nullable=False)
+    entry = Column(Float, nullable=False)
+    confidence = Column(Integer, nullable=False)
+    sent_at = Column(DateTime, default=datetime.utcnow, index=True)
