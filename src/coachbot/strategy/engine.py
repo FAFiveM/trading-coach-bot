@@ -365,9 +365,7 @@ def build_trade_idea(
     if aligned_obs:
         ob = aligned_obs[-1]
         ob_zone = ob
-        confluences.append(
-            f"Order Block ({ob.direction}) on 15m between {ob.bottom:.6g}-{ob.top:.6g}"
-        )
+        confluences.append(f"Order Block ({ob.direction}) on 15m between {ob.bottom:.6g}-{ob.top:.6g}")
         confidence += 10
     else:
         high_tier_eligible = False
@@ -515,8 +513,7 @@ def build_trade_idea(
         tp3 = entry - risk * rr3
 
     invalidations.append(
-        f"Idea invalid if a 15m candle closes "
-        f"{'below' if side == 'long' else 'above'} {stop_loss:.6g}"
+        f"Idea invalid if a 15m candle closes {'below' if side == 'long' else 'above'} {stop_loss:.6g}"
     )
     notes.append("Prefer entry after a clean 1m break of structure with a volume expansion.")
     if rejections and confidence < 85:

@@ -282,9 +282,7 @@ class CoachScheduler:
             best.sort(key=lambda i: i.confidence, reverse=True)
             for idea in best[:5]:
                 arrow = ui.side_arrow(idea.side)
-                top_lines.append(
-                    f"{arrow}  **{idea.symbol}** — {idea.confidence}% ({idea.grade})"
-                )
+                top_lines.append(f"{arrow}  **{idea.symbol}** — {idea.confidence}% ({idea.grade})")
             news = await fetch_news("all", 5)
             label, score = aggregate_sentiment(news)
 
@@ -293,8 +291,7 @@ class CoachScheduler:
                 color=ui.COLOR_INFO,
             )
             embed.description = (
-                f"Sentiment: **{label}** ({score:+.2f})\n"
-                "Top setups across major forex + crypto right now:"
+                f"Sentiment: **{label}** ({score:+.2f})\nTop setups across major forex + crypto right now:"
             )
             embed.add_field(
                 name="📊 Top Setups",
