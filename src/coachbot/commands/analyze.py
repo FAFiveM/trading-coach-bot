@@ -10,6 +10,8 @@ from .. import ui
 from ..charts.render import render_trade_chart
 from ..coach.lessons import COACH_QUESTIONS
 from ..data.market_data import get_market_service
+from ..profile import get_profile_for_user
+from ..signal_view import TradeIdeaView, one_tap_copy_block, usd_breakdown
 from ..strategy.engine import build_trade_idea
 
 
@@ -21,7 +23,7 @@ def _bias_label_emoji(label: str) -> str:
     return "⚪"
 
 
-def _format_idea_embed(idea, inst_display: str) -> discord.Embed:
+def _format_idea_embed(idea, inst_display: str, profile=None) -> discord.Embed:
     color = ui.side_color(idea.side)
     title = f"📊 {inst_display} — {ui.side_arrow(idea.side)}"
 
@@ -84,6 +86,19 @@ def _format_idea_embed(idea, inst_display: str) -> discord.Embed:
             inline=True,
         )
 
+        if profile is not None:
+            embed.add_field(
+                name=f"💰 Trade in USD (${profile.stake_usd:.0f} stake)",
+                value=ui.code_block(usd_breakdown(idea, profile)),
+                inline=False,
+            )
+
+        embed.add_field(
+            name="📋 One-Tap Copy",
+            value=one_tap_copy_block(idea),
+            inline=False,
+        )
+
     if idea.confluences:
         embed.add_field(
             name=f"✅ Confluences ({len(idea.confluences)})",
@@ -139,9 +154,15 @@ def register(tree: app_commands.CommandTree) -> None:
             await interaction.followup.send(embed=embed)
             return
 
-        idea = build_trade_idea(inst.display, mtf)
+        profile = await get_profile_for_user(str(interaction.user.id))
+        idea = build_trade_idea(
+            inst.display,
+            mtf,
+            rr_min=max(2.0, profile.rr_min),
+            rr_max=max(profile.rr_max, profile.rr_min + 1.0),
+        )
         idea.timeframe_entry = entry_tf
-        embed = _format_idea_embed(idea, inst.display)
+        embed = _format_idea_embed(idea, inst.display, profile=profile)
 
         files: list[discord.File] = []
         chart_path = None
@@ -169,4 +190,5 @@ def register(tree: app_commands.CommandTree) -> None:
                 inline=False,
             )
 
-        await interaction.followup.send(embed=embed, files=files)
+        view = TradeIdeaView(idea) if idea.side != "none" else None
+        await interaction.followup.send(embed=embed, files=files, view=view)

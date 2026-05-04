@@ -253,8 +253,8 @@ def _last_swing_levels(df: pd.DataFrame) -> tuple[float | None, float | None]:
 def build_trade_idea(
     symbol: str,
     mtf: dict[str, pd.DataFrame],
-    rr_min: float = 2.0,
-    rr_max: float = 5.0,
+    rr_min: float = 3.0,
+    rr_max: float = 6.0,
 ) -> TradeIdea:
     biases: list[Bias] = []
     for tf in ("4h", "1h", "15m", "5m"):
@@ -491,17 +491,19 @@ def build_trade_idea(
 
     risk = max(risk, last * 0.0005)
 
+    # Targets sized for a $100-stake profile: TP1=$300, TP2=$450, TP3=$600 -> R:R 3/4.5/6
     if confidence >= 85:
-        rr1, rr2, rr3 = 2.5, 4.0, 5.0
+        rr1, rr2, rr3 = 3.0, 4.5, 6.0
     elif confidence >= 70:
-        rr1, rr2, rr3 = 2.0, 3.0, 4.5
+        rr1, rr2, rr3 = 2.5, 3.5, 5.0
     elif confidence >= 55:
         rr1, rr2, rr3 = 2.0, 2.75, 3.5
     else:
         rr1, rr2, rr3 = 2.0, 2.5, 3.0
 
     rr1 = max(rr1, rr_min)
-    rr3 = min(rr3, rr_max)
+    rr3 = max(rr3, rr_min)
+    rr3 = min(rr3, max(rr_max, rr1))
 
     if side == "long":
         tp1 = entry + risk * rr1

@@ -25,6 +25,8 @@ from ..db.models import (
     UserSettings,
 )
 from ..db.session import get_session
+from ..profile import get_default_or_first_profile
+from ..signal_view import TradeIdeaView, build_signal_embed
 from ..strategy.engine import TradeIdea, build_trade_idea
 
 SCAN_FOREX = [
@@ -196,7 +198,8 @@ class CoachScheduler:
             chans = list(res.scalars())
         if not chans:
             return False
-        embed = self._build_signal_embed(idea)
+        profile = await get_default_or_first_profile()
+        embed = build_signal_embed(idea, profile=profile)
         sent_any = False
         for c in chans:
             if idea.confidence < int(c.min_confidence or 85):
@@ -209,10 +212,12 @@ class CoachScheduler:
                 file = discord.File(str(chart_path)) if chart_path else None
                 if file:
                     embed.set_image(url=f"attachment://{chart_path.name}")
+                view = TradeIdeaView(idea)
                 await channel.send(
                     content=content,
                     embed=embed,
                     file=file,
+                    view=view,
                     allowed_mentions=discord.AllowedMentions(everyone=True),
                 )
                 sent_any = True
@@ -220,45 +225,6 @@ class CoachScheduler:
                 logger.warning(f"signal broadcast failed for channel {c.channel_id}: {exc}")
             await asyncio.sleep(0.3)
         return sent_any
-
-    def _build_signal_embed(self, idea: TradeIdea) -> discord.Embed:
-        title = f"⚡ A+ Auto-Signal · {idea.symbol} · {ui.side_arrow(idea.side)}"
-        color = ui.side_color(idea.side)
-        embed = ui.base_embed(title, color=color)
-        embed.description = (
-            f"**Confidence:** {idea.confidence}% · Grade **{idea.grade}**\n"
-            f"`{ui.confidence_bar(idea.confidence)}`"
-        )
-        plan = (
-            f"Entry  {ui.fmt_price(idea.entry)}\n"
-            f"SL     {ui.fmt_price(idea.stop_loss)}\n"
-            f"TP1    {ui.fmt_price(idea.take_profit_1)}   (1:{idea.rr_1:.2f})\n"
-            f"TP2    {ui.fmt_price(idea.take_profit_2)}   (1:{idea.rr_2:.2f})\n"
-            f"TP3    {ui.fmt_price(idea.take_profit_3)}   (1:{idea.rr_3:.2f})"
-        )
-        embed.add_field(name="📐 Trade Plan", value=ui.code_block(plan), inline=False)
-        if idea.confluences:
-            top = idea.confluences[:6]
-            embed.add_field(
-                name="🧬 Confluences",
-                value="\n".join(f"• {c}" for c in top),
-                inline=False,
-            )
-        if idea.invalidations:
-            embed.add_field(
-                name="🛑 Invalidation",
-                value="\n".join(f"• {c}" for c in idea.invalidations[:3]),
-                inline=False,
-            )
-        embed.add_field(
-            name="ℹ️ Disclaimer",
-            value=(
-                "Confidence reflects how many internal filters aligned — it is **not** "
-                "a guaranteed win rate. Always size with risk in mind."
-            ),
-            inline=False,
-        )
-        return embed
 
     # ---------- hourly market briefing ---------- #
 

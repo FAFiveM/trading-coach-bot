@@ -28,4 +28,4 @@ def test_build_idea_runs():
     if idea.side != "none":
         assert idea.stop_loss != idea.entry
         assert idea.rr_1 >= 2.0
-        assert idea.rr_3 <= 5.0
+        assert idea.rr_3 <= 7.0

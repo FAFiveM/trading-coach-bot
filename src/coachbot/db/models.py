@@ -73,6 +73,12 @@ class UserSettings(Base):
     max_daily_loss_pct = Column(Float, default=3.0)
     coach_mode = Column(Integer, default=1)
     timezone = Column(String(64), default="UTC")
+    # Dollar-based trade profile (per-trade)
+    stake_usd = Column(Float, default=100.0)
+    sl_min_usd = Column(Float, default=70.0)
+    sl_max_usd = Column(Float, default=100.0)
+    tp_min_usd = Column(Float, default=300.0)
+    tp_max_usd = Column(Float, default=600.0)
 
 
 class SignalsChannel(Base):
