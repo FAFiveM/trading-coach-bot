@@ -1,0 +1,30 @@
+app = "trading-coach-bot-fafivem"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  COACH_DAILY_HOUR_UTC = "6"
+  COACH_TIMEZONE = "UTC"
+  COACH_DEFAULT_RISK_PCT = "1.0"
+  COACH_DB_URL = "sqlite+aiosqlite:////data/coach.db"
+  LOG_LEVEL = "INFO"
+
+[[mounts]]
+  source = "coach_data"
+  destination = "/data"
+
+[processes]
+  app = "python -m coachbot"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  cpus = 1
+
+# Set the bot token (and optional API keys) as Fly secrets:
+#   fly secrets set DISCORD_BOT_TOKEN=...
+#   fly secrets set TWELVE_DATA_API_KEY=...
+#   fly secrets set CRYPTOPANIC_API_KEY=...
+#   fly secrets set ETHERSCAN_API_KEY=...
